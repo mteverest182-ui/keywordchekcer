@@ -1,18 +1,41 @@
 # app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import time
 import os
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from bs4 import BeautifulSoup
+import time
+import sys
+import json
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Izinkan akses dari mana saja
 
 # ============================================================
-# GOOGLE SEARCH SCRAPER
+# OPSI 1: MENGGUNAKAN SELENIUM + CHROME (JIWA TERSEDIA)
+# ============================================================
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from bs4 import BeautifulSoup
+    SELENIUM_AVAILABLE = True
+    print("✅ Selenium tersedia")
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    print("⚠️ Selenium tidak tersedia, menggunakan fallback")
+
+# ============================================================
+# OPSI 2: FALLBACK - GOOGLESEARCH-PYTHON (TANPA CHROME)
+# ============================================================
+try:
+    from googlesearch import search
+    GOOGLESEARCH_AVAILABLE = True
+    print("✅ googlesearch-python tersedia")
+except ImportError:
+    GOOGLESEARCH_AVAILABLE = False
+    print("⚠️ googlesearch-python tidak tersedia")
+
+# ============================================================
+# SCRAPER CLASS (SELENIUM VERSION)
 # ============================================================
 class GoogleSearchScraper:
     def __init__(self, headless=True):
@@ -20,7 +43,9 @@ class GoogleSearchScraper:
         self.driver = None
     
     def setup_driver(self):
-        """Setup ChromeDriver dengan opsi headless"""
+        if not SELENIUM_AVAILABLE:
+            return None
+        
         options = Options()
         
         # Mode headless
@@ -42,34 +67,29 @@ class GoogleSearchScraper:
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-setuid-sandbox")
         
-        # ===== CARA BARU: Gunakan Chrome di Render =====
-        # Render menyediakan Chrome di path ini
+        # Cari Chrome di berbagai path
         chrome_paths = [
             "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable", 
+            "/usr/bin/google-chrome-stable",
             "/usr/bin/chromium-browser",
             "/opt/render/project/src/.chrome/chrome",
+            "/opt/render/.cache/chrome/chrome",
+            "/opt/chrome/chrome",
         ]
         
-        chrome_found = False
         for chrome_path in chrome_paths:
             if os.path.exists(chrome_path):
                 options.binary_location = chrome_path
                 print(f"✅ Menggunakan Chrome di: {chrome_path}")
-                chrome_found = True
                 break
         
-        if not chrome_found:
-            print("⚠️ Chrome tidak ditemukan, mencoba default...")
-        
-        # Setup driver - pakai chromedriver dari PATH
         try:
             self.driver = webdriver.Chrome(options=options)
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             print("✅ ChromeDriver berhasil diinisialisasi")
             return self.driver
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ ChromeDriver error: {e}")
             return None
     
     def search(self, query, num_results=10):
@@ -78,7 +98,7 @@ class GoogleSearchScraper:
                 return []
         
         search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}&num={num_results}"
-        print(f"🔍 Mencari: {query}")
+        print(f"🔍 Mencari (Selenium): {query}")
         
         try:
             self.driver.get(search_url)
@@ -126,7 +146,7 @@ class GoogleSearchScraper:
             
             return results
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ Selenium error: {e}")
             return []
     
     def close(self):
@@ -134,17 +154,53 @@ class GoogleSearchScraper:
             self.driver.quit()
 
 # ============================================================
-# ROUTES
+# FUNGSI SEARCH FALLBACK (GOOGLESEARCH-PYTHON)
+# ============================================================
+def search_google_fallback(query, num_results=10):
+    """Fallback menggunakan googlesearch-python (tanpa Chrome)"""
+    if not GOOGLESEARCH_AVAILABLE:
+        return []
+    
+    print(f"🔍 Mencari (Fallback): {query}")
+    
+    try:
+        results = []
+        for url in search(query, num_results=num_results):
+            results.append({
+                'url': url,
+                'title': f"Hasil dari Google: {url.split('/')[-1] or 'No Title'}",
+                'snippet': f"Hasil pencarian untuk '{query}'"
+            })
+        return results
+    except Exception as e:
+        print(f"❌ Fallback error: {e}")
+        return []
+
+# ============================================================
+# SCRAPER INSTANCE
 # ============================================================
 scraper = None
+use_fallback = False
 
 def get_scraper():
-    global scraper
-    if scraper is None:
+    global scraper, use_fallback
+    
+    # Jika fallback sudah diaktifkan, gunakan fallback
+    if use_fallback:
+        return None
+    
+    if scraper is None and SELENIUM_AVAILABLE:
         scraper = GoogleSearchScraper(headless=True)
-        scraper.setup_driver()
+        if scraper.setup_driver() is None:
+            print("⚠️ Selenium gagal, beralih ke fallback")
+            use_fallback = True
+            return None
+    
     return scraper
 
+# ============================================================
+# ROUTES
+# ============================================================
 @app.route('/search', methods=['GET'])
 def search_google():
     query = request.args.get('q', '')
@@ -154,20 +210,52 @@ def search_google():
         return jsonify({'error': 'Parameter "q" diperlukan'}), 400
     
     try:
-        scraper = get_scraper()
-        results = scraper.search(query, num_results=limit)
+        # Coba pakai Selenium dulu
+        scraper_instance = get_scraper()
         
-        return jsonify({
-            'query': query,
-            'results': results,
-            'total': len(results)
-        })
+        if scraper_instance and not use_fallback:
+            results = scraper_instance.search(query, num_results=limit)
+            if results:
+                return jsonify({
+                    'query': query,
+                    'results': results,
+                    'total': len(results),
+                    'source': 'selenium'
+                })
+            else:
+                print("⚠️ Selenium tidak menghasilkan hasil, coba fallback...")
+        
+        # Fallback ke googlesearch-python
+        if GOOGLESEARCH_AVAILABLE:
+            results = search_google_fallback(query, num_results=limit)
+            return jsonify({
+                'query': query,
+                'results': results,
+                'total': len(results),
+                'source': 'fallback'
+            })
+        else:
+            return jsonify({
+                'query': query,
+                'results': [],
+                'total': 0,
+                'source': 'none',
+                'error': 'Tidak ada metode pencarian yang tersedia'
+            })
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'message': 'Google Search API running'})
+    status = {
+        'status': 'ok',
+        'message': 'Google Search API running',
+        'selenium': SELENIUM_AVAILABLE,
+        'googlesearch': GOOGLESEARCH_AVAILABLE,
+        'use_fallback': use_fallback
+    }
+    return jsonify(status)
 
 @app.route('/')
 def index():
@@ -177,6 +265,10 @@ def index():
         'endpoints': {
             '/search': 'GET - Cari di Google (parameter: q, limit)',
             '/health': 'GET - Cek status server'
+        },
+        'methods': {
+            'selenium': SELENIUM_AVAILABLE,
+            'googlesearch': GOOGLESEARCH_AVAILABLE
         }
     })
 
@@ -194,6 +286,10 @@ atexit.register(cleanup)
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"🚀 Google Search API dengan Headless Chrome")
+    print("="*50)
+    print("🚀 Google Search API dengan Headless Chrome")
     print(f"📡 Server berjalan di port {port}")
+    print(f"🔍 Selenium: {'✅' if SELENIUM_AVAILABLE else '❌'}")
+    print(f"🔍 googlesearch: {'✅' if GOOGLESEARCH_AVAILABLE else '❌'}")
+    print("="*50)
     app.run(host='0.0.0.0', port=port, debug=False)
