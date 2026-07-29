@@ -2,16 +2,16 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import time
+import os
+import sys
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-import os
 
 app = Flask(__name__)
-CORS(app)  # Izinkan akses dari mana saja
+CORS(app)
 
 # ============================================================
 # GOOGLE SEARCH SCRAPER
@@ -25,32 +25,61 @@ class GoogleSearchScraper:
         """Setup ChromeDriver dengan opsi headless"""
         options = Options()
         
-        if self.headless:
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
+        # Mode headless
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
         
+        # Opsi penting untuk Render
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
+        
+        # User-Agent
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        # Opsi tambahan
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-setuid-sandbox")
         
-        # Untuk Render, gunakan Chrome yang sudah tersedia
-        # Atau install ChromeDriver otomatis
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=options)
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # Coba gunakan Chrome yang sudah terinstall di Render
+        chrome_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+        ]
         
+        for chrome_path in chrome_paths:
+            if os.path.exists(chrome_path):
+                options.binary_location = chrome_path
+                print(f"✅ Menggunakan Chrome di: {chrome_path}")
+                break
+        
+        # Setup driver
+        try:
+            # Coba dengan webdriver-manager
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=options)
+        except Exception as e:
+            print(f"⚠️ Webdriver-manager gagal: {e}")
+            # Fallback: coba tanpa webdriver-manager
+            try:
+                self.driver = webdriver.Chrome(options=options)
+            except Exception as e2:
+                print(f"❌ Semua metode gagal: {e2}")
+                return None
+        
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         print("✅ ChromeDriver berhasil diinisialisasi")
         return self.driver
     
     def search(self, query, num_results=10):
         if not self.driver:
-            self.setup_driver()
+            if self.setup_driver() is None:
+                return []
         
         search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}&num={num_results}"
         print(f"🔍 Mencari: {query}")
@@ -109,7 +138,7 @@ class GoogleSearchScraper:
             self.driver.quit()
 
 # ============================================================
-# SCRAPER INSTANCE
+# ROUTES
 # ============================================================
 scraper = None
 
@@ -120,9 +149,6 @@ def get_scraper():
         scraper.setup_driver()
     return scraper
 
-# ============================================================
-# ROUTES
-# ============================================================
 @app.route('/search', methods=['GET'])
 def search_google():
     query = request.args.get('q', '')
@@ -145,7 +171,7 @@ def search_google():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'message': 'Google Search API with Headless Chrome'})
+    return jsonify({'status': 'ok', 'message': 'Google Search API running'})
 
 @app.route('/')
 def index():
