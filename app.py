@@ -3,11 +3,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import time
 import os
-import sys
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
@@ -44,37 +42,35 @@ class GoogleSearchScraper:
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-setuid-sandbox")
         
-        # Coba gunakan Chrome yang sudah terinstall di Render
+        # ===== CARA BARU: Gunakan Chrome di Render =====
+        # Render menyediakan Chrome di path ini
         chrome_paths = [
             "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome-stable", 
             "/usr/bin/chromium-browser",
-            "/usr/bin/chromium",
+            "/opt/render/project/src/.chrome/chrome",
         ]
         
+        chrome_found = False
         for chrome_path in chrome_paths:
             if os.path.exists(chrome_path):
                 options.binary_location = chrome_path
                 print(f"✅ Menggunakan Chrome di: {chrome_path}")
+                chrome_found = True
                 break
         
-        # Setup driver
-        try:
-            # Coba dengan webdriver-manager
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
-        except Exception as e:
-            print(f"⚠️ Webdriver-manager gagal: {e}")
-            # Fallback: coba tanpa webdriver-manager
-            try:
-                self.driver = webdriver.Chrome(options=options)
-            except Exception as e2:
-                print(f"❌ Semua metode gagal: {e2}")
-                return None
+        if not chrome_found:
+            print("⚠️ Chrome tidak ditemukan, mencoba default...")
         
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        print("✅ ChromeDriver berhasil diinisialisasi")
-        return self.driver
+        # Setup driver - pakai chromedriver dari PATH
+        try:
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            print("✅ ChromeDriver berhasil diinisialisasi")
+            return self.driver
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            return None
     
     def search(self, query, num_results=10):
         if not self.driver:
