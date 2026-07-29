@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: google-search-api
+    name: ketwordchekcer
     env: python
     buildCommand: |
       pip install -r requirements.txt
