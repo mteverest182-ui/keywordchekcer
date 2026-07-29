@@ -1,21 +1,4 @@
-# app.py
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import requests
-import json
-
-app = Flask(__name__)
-CORS(app)
-
-# ============================================================
-# KONFIGURASI SERPER.DEV
-# ============================================================
-SERPER_API_KEY = '5eba4712b596a478b034be1809caffbc8f767f47'  # Ganti dengan API Key Anda
-
-# ============================================================
-# FUNGSI PENCARIAN
-# ============================================================
+# app.py - Update fungsi search_google
 def search_google(query, num_results=10):
     """Mencari di Google menggunakan Serper.dev API"""
     
@@ -25,11 +8,14 @@ def search_google(query, num_results=10):
     
     url = "https://google.serper.dev/search"
     
+    # Serper.dev tidak mendukung parameter 'num' langsung
+    # Gunakan 'page' untuk kontrol hasil
     payload = json.dumps({
         "q": query,
-        "num": num_results,
         "gl": "id",      # Indonesia
-        "hl": "id"       # Bahasa Indonesia
+        "hl": "id",      # Bahasa Indonesia
+        "autocorrect": True,
+        "page": 1        # Halaman 1
     })
     
     headers = {
@@ -40,29 +26,79 @@ def search_google(query, num_results=10):
     try:
         print(f"🔍 Mencari: {query}")
         response = requests.post(url, headers=headers, data=payload, timeout=30)
-        data = response.json()
+        
+        print(f"📊 Status Code: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"❌ API Error: {data}")
+            print(f"❌ API Error: {response.text}")
             return []
+        
+        data = response.json()
+        
+        # DEBUG: Tampilkan struktur response
+        print(f"📋 Response keys: {list(data.keys())}")
         
         results = []
         
-        # Ambil dari organic results
-        for item in data.get('organic', [])[:num_results]:
-            results.append({
-                'url': item.get('link', ''),
-                'title': item.get('title', 'No Title'),
-                'snippet': item.get('snippet', '')
-            })
+        # ===== CEK BERBAGAI KEMUNGKINAN STRUKTUR =====
         
-        # Jika tidak ada organic, coba dari answer_box
+        # 1. Organic results (yang paling umum)
+        if 'organic' in data and data['organic']:
+            print(f"✅ Organic results found: {len(data['organic'])}")
+            for item in data['organic'][:num_results]:
+                results.append({
+                    'url': item.get('link', ''),
+                    'title': item.get('title', 'No Title'),
+                    'snippet': item.get('snippet', '')
+                })
+        
+        # 2. Answer box (jika ada)
         if not results and 'answerBox' in data:
             answer = data['answerBox']
+            print("✅ Answer box found")
             results.append({
                 'url': data.get('searchParameters', {}).get('q', ''),
                 'title': answer.get('title', 'Hasil Pencarian'),
                 'snippet': answer.get('snippet', answer.get('answer', ''))
+            })
+        
+        # 3. Knowledge graph (jika ada)
+        if not results and 'knowledgeGraph' in data:
+            kg = data['knowledgeGraph']
+            print("✅ Knowledge graph found")
+            results.append({
+                'url': kg.get('link', ''),
+                'title': kg.get('title', 'Hasil Pencarian'),
+                'snippet': kg.get('description', '')
+            })
+        
+        # 4. People also ask (jika ada)
+        if not results and 'peopleAlsoAsk' in data:
+            print("✅ People also ask found")
+            for item in data['peopleAlsoAsk'][:num_results]:
+                results.append({
+                    'url': '',
+                    'title': item.get('question', 'Pertanyaan Terkait'),
+                    'snippet': item.get('snippet', '')
+                })
+        
+        # 5. Related searches (jika ada)
+        if not results and 'relatedSearches' in data:
+            print("✅ Related searches found")
+            for item in data['relatedSearches'][:num_results]:
+                results.append({
+                    'url': '',
+                    'title': item.get('query', 'Pencarian Terkait'),
+                    'snippet': ''
+                })
+        
+        # Jika tetap kosong, berikan link ke Google langsung
+        if not results:
+            print("⚠️ Tidak ada hasil, memberikan link ke Google")
+            results.append({
+                'url': f'https://www.google.com/search?q={query}',
+                'title': f'Cari "{query}" di Google',
+                'snippet': 'Klik link ini untuk melihat hasil langsung di Google.'
             })
         
         return results
@@ -72,67 +108,6 @@ def search_google(query, num_results=10):
         return []
     except Exception as e:
         print(f"❌ Error Serper.dev: {e}")
+        import traceback
+        traceback.print_exc()
         return []
-
-# ============================================================
-# ROUTES
-# ============================================================
-@app.route('/')
-def index():
-    return jsonify({
-        'name': 'Google Search API',
-        'status': 'running',
-        'source': 'Serper.dev',
-        'endpoints': {
-            '/search': 'GET - Cari di Google (parameter: q, limit)',
-            '/health': 'GET - Cek status server'
-        }
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({
-        'status': 'ok',
-        'message': 'Google Search API running with Serper.dev',
-        'api_configured': bool(SERPER_API_KEY and SERPER_API_KEY != '5eba4712b596a478b034be1809caffbc8f767f47')
-    })
-
-@app.route('/search')
-def search_endpoint():
-    query = request.args.get('q', '')
-    limit = int(request.args.get('limit', 10))
-    
-    if not query:
-        return jsonify({'error': 'Parameter "q" diperlukan'}), 400
-    
-    if limit > 50:
-        limit = 50  # Batasi maksimal 50
-    
-    try:
-        results = search_google(query, num_results=limit)
-        
-        return jsonify({
-            'query': query,
-            'results': results,
-            'total': len(results),
-            'source': 'serper.dev'
-        })
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return jsonify({
-            'error': str(e),
-            'query': query
-        }), 500
-
-# ============================================================
-# START SERVER
-# ============================================================
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    print("="*50)
-    print("🚀 Google Search API with Serper.dev")
-    print(f"📡 Port: {port}")
-    print(f"🔑 API Key: {'✅' if SERPER_API_KEY else '❌'}")
-    print("="*50)
-    app.run(host='0.0.0.0', port=port, debug=False)
