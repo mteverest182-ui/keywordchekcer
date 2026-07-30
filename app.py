@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
@@ -8,36 +7,29 @@ import sys
 import traceback
 
 app = Flask(__name__)
-CORS(app)  # Izinkan akses dari semua domain
+CORS(app) 
 
-# ============================================================
-# KONFIGURASI
-# ============================================================
-# Dapatkan token dari https://scrape.do/signup
-SCRAPE_DO_TOKEN = 'YOUR_SCRAPE_DO_TOKEN'  # <-- GANTI DENGAN TOKEN ANDA
+SCRAPE_DO_TOKEN = '48dcadf773fe42558bdd9e88ff9acc78ab2cda223f1' 
 
-# ============================================================
-# FUNGSI PENCARIAN DENGAN SCRAPE.DO
-# ============================================================
 def search_google(query, num_results=10):
     """
     Mencari di Google menggunakan Scrape.do API
     Mengembalikan list of dict: {url, title, snippet}
     """
     
-    # Cek apakah token sudah diisi
+
     if not SCRAPE_DO_TOKEN or SCRAPE_DO_TOKEN == 'YOUR_SCRAPE_DO_TOKEN':
         print("⚠️ API Key Scrape.do belum diisi!")
         return []
     
-    # Endpoint Scrape.do untuk Google Search
+
     url = "https://api.scrape.do/plugin/google/search"
     
     params = {
         'token': SCRAPE_DO_TOKEN,
         'q': query,
-        'gl': 'id',      # Indonesia
-        'hl': 'id',      # Bahasa Indonesia
+        'gl': 'id',     
+        'hl': 'id',     
         'num': num_results
     }
     
@@ -61,12 +53,12 @@ def search_google(query, num_results=10):
         
         data = response.json()
         
-        # Debug: lihat struktur data
+    
         print(f"📋 Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
         
         results = []
         
-        # Ambil dari organic_results
+    
         if 'organic_results' in data:
             organic = data['organic_results']
             print(f"✅ Organic results found: {len(organic)}")
@@ -77,10 +69,10 @@ def search_google(query, num_results=10):
                     'snippet': item.get('snippet', '')
                 })
         else:
-            # Coba struktur lain (fallback)
+        
             print("⚠️ Tidak ada 'organic_results', mencoba struktur lain...")
             
-            # Coba dari 'results'
+        
             if 'results' in data:
                 for item in data['results'][:num_results]:
                     results.append({
@@ -89,7 +81,7 @@ def search_google(query, num_results=10):
                         'snippet': item.get('description', '')
                     })
             
-            # Coba dari 'organic'
+        
             elif 'organic' in data:
                 for item in data['organic'][:num_results]:
                     results.append({
@@ -98,7 +90,7 @@ def search_google(query, num_results=10):
                         'snippet': item.get('snippet', '')
                     })
         
-        # Jika tetap tidak ada hasil, berikan link ke Google
+    
         if not results:
             print("⚠️ Tidak ada hasil, memberikan link ke Google")
             results.append({
@@ -120,9 +112,6 @@ def search_google(query, num_results=10):
         traceback.print_exc()
         return []
 
-# ============================================================
-# ROUTES
-# ============================================================
 @app.route('/')
 def index():
     return jsonify({
@@ -153,12 +142,12 @@ def search_endpoint():
     query = request.args.get('q', '')
     limit = int(request.args.get('limit', 10))
     
-    # Validasi
+
     if not query:
         return jsonify({'error': 'Parameter "q" diperlukan'}), 400
     
     if limit > 50:
-        limit = 50  # Batasi maksimal 50
+        limit = 50 
     
     try:
         print(f"📥 Request: query='{query}', limit={limit}")
@@ -181,9 +170,6 @@ def search_endpoint():
             'status': 'error'
         }), 500
 
-# ============================================================
-# ERROR HANDLING
-# ============================================================
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({'error': 'Endpoint tidak ditemukan'}), 404
@@ -192,9 +178,6 @@ def not_found(e):
 def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================
-# START SERVER
-# ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print("="*50)
