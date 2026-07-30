@@ -11,18 +11,19 @@ CORS(app)
 
 SCRAPE_DO_TOKEN = '48dcadf773fe42558bdd9e88ff9acc78ab2cda223f1' 
 
+# ============================================================
+# FUNGSI PENCARIAN GOOGLE (SEARCH)
+# ============================================================
 def search_google(query, num_results=10):
     """
     Mencari di Google menggunakan Scrape.do API
     Mengembalikan list of dict: {url, title, snippet}
     """
     
-
     if not SCRAPE_DO_TOKEN or SCRAPE_DO_TOKEN == 'YOUR_SCRAPE_DO_TOKEN':
         print("⚠️ API Key Scrape.do belum diisi!")
         return []
     
-
     url = "https://api.scrape.do/plugin/google/search"
     
     params = {
@@ -53,12 +54,10 @@ def search_google(query, num_results=10):
         
         data = response.json()
         
-    
         print(f"📋 Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
         
         results = []
         
-    
         if 'organic_results' in data:
             organic = data['organic_results']
             print(f"✅ Organic results found: {len(organic)}")
@@ -69,10 +68,8 @@ def search_google(query, num_results=10):
                     'snippet': item.get('snippet', '')
                 })
         else:
-        
             print("⚠️ Tidak ada 'organic_results', mencoba struktur lain...")
             
-        
             if 'results' in data:
                 for item in data['results'][:num_results]:
                     results.append({
@@ -81,7 +78,6 @@ def search_google(query, num_results=10):
                         'snippet': item.get('description', '')
                     })
             
-        
             elif 'organic' in data:
                 for item in data['organic'][:num_results]:
                     results.append({
@@ -90,7 +86,6 @@ def search_google(query, num_results=10):
                         'snippet': item.get('snippet', '')
                     })
         
-    
         if not results:
             print("⚠️ Tidak ada hasil, memberikan link ke Google")
             results.append({
@@ -112,6 +107,86 @@ def search_google(query, num_results=10):
         traceback.print_exc()
         return []
 
+# ============================================================
+# FUNGSI TRENDING (BARU!)
+# ============================================================
+def get_trending_indonesia(limit=10, hours=24):
+    """
+    Mengambil topik trending di Indonesia menggunakan Scrape.do API
+    Mengembalikan list of dict: {title, search_volume, growth_percentage, ...}
+    """
+    
+    if not SCRAPE_DO_TOKEN or SCRAPE_DO_TOKEN == 'YOUR_SCRAPE_DO_TOKEN':
+        print("⚠️ API Key Scrape.do belum diisi!")
+        return []
+    
+    url = "https://api.scrape.do/plugin/google/trending"
+    
+    params = {
+        'token': SCRAPE_DO_TOKEN,
+        'geo': 'ID',         # Indonesia
+        'hl': 'id',          # Bahasa Indonesia
+        'hours': hours,      # 4, 24, 48, 168
+        'cat': 0             # 0 = All categories
+    }
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+    
+    try:
+        print(f"🔥 Mengambil trending di Indonesia...")
+        print(f"📡 URL: {url}")
+        print(f"📋 Params: {params}")
+        
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        
+        print(f"📊 Status Code: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"❌ API Error: {response.text}")
+            return []
+        
+        data = response.json()
+        
+        print(f"📋 Response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        
+        results = []
+        
+        # Ambil dari 'trends'
+        if 'trends' in data:
+            trends = data['trends']
+            print(f"✅ Trending found: {len(trends)}")
+            for item in trends[:limit]:
+                results.append({
+                    'title': item.get('title', ''),
+                    'search_volume': item.get('search_volume', 0),
+                    'growth_percentage': item.get('growth_percentage', ''),
+                    'started_at': item.get('started_at', ''),
+                    'status': item.get('status', ''),
+                    'url': f"https://www.google.com/search?q={item.get('title', '')}"
+                })
+        else:
+            print("⚠️ Tidak ada 'trends' dalam response")
+            print(f"📄 Response: {json.dumps(data, indent=2)[:500]}...")
+        
+        return results
+        
+    except requests.exceptions.Timeout:
+        print("❌ Timeout: Server Scrape.do tidak merespon")
+        return []
+    except requests.exceptions.ConnectionError:
+        print("❌ Connection Error: Gagal terhubung ke Scrape.do")
+        return []
+    except Exception as e:
+        print(f"❌ Error Scrape.do: {e}")
+        traceback.print_exc()
+        return []
+
+# ============================================================
+# ROUTES
+# ============================================================
 @app.route('/')
 def index():
     return jsonify({
@@ -120,6 +195,7 @@ def index():
         'source': 'Scrape.do',
         'endpoints': {
             '/search': 'GET - Cari di Google (parameter: q, limit)',
+            '/trending': 'GET - Trending Indonesia (parameter: limit, hours)',
             '/health': 'GET - Cek status server'
         },
         'config': {
@@ -138,11 +214,10 @@ def health():
 
 @app.route('/search')
 def search_endpoint():
-    """Endpoint utama untuk pencarian"""
+    """Endpoint untuk pencarian"""
     query = request.args.get('q', '')
     limit = int(request.args.get('limit', 10))
     
-
     if not query:
         return jsonify({'error': 'Parameter "q" diperlukan'}), 400
     
@@ -158,6 +233,7 @@ def search_endpoint():
             'results': results,
             'total': len(results),
             'source': 'scrape.do',
+            'type': 'search',
             'status': 'success'
         })
         
@@ -170,6 +246,46 @@ def search_endpoint():
             'status': 'error'
         }), 500
 
+# ============================================================
+# ROUTE TRENDING (BARU!)
+# ============================================================
+@app.route('/trending')
+def trending_endpoint():
+    """Endpoint untuk trending di Indonesia"""
+    limit = int(request.args.get('limit', 10))
+    hours = int(request.args.get('hours', 24))
+    
+    if limit > 50:
+        limit = 50
+    
+    if hours not in [4, 24, 48, 168]:
+        hours = 24
+    
+    try:
+        print(f"📥 Request: trending, limit={limit}, hours={hours}")
+        results = get_trending_indonesia(limit=limit, hours=hours)
+        
+        return jsonify({
+            'trending': results,
+            'total': len(results),
+            'source': 'scrape.do',
+            'type': 'trending',
+            'geo': 'Indonesia',
+            'hours': hours,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error di /trending: {e}")
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
+# ============================================================
+# ERROR HANDLING
+# ============================================================
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({'error': 'Endpoint tidak ditemukan'}), 404
@@ -178,11 +294,18 @@ def not_found(e):
 def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
+# ============================================================
+# START SERVER
+# ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print("="*50)
     print("🚀 Google Search API with Scrape.do")
     print(f"📡 Port: {port}")
     print(f"🔑 Token: {'✅ Configured' if SCRAPE_DO_TOKEN and SCRAPE_DO_TOKEN != 'YOUR_SCRAPE_DO_TOKEN' else '❌ Not configured'}")
+    print("="*50)
+    print("📌 Endpoints:")
+    print("  /search?q=keyword&limit=10  - Pencarian Google")
+    print("  /trending?limit=10&hours=24 - Trending Indonesia")
     print("="*50)
     app.run(host='0.0.0.0', port=port, debug=False)
