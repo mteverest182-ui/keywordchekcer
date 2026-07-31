@@ -9,7 +9,7 @@ import traceback
 app = Flask(__name__)
 CORS(app) 
 
-SCRAPE_DO_TOKEN = '48dcadf773fe42558bdd9e88ff9acc78ab2cda223f1' 
+SCRAPE_DO_TOKEN = '6a3f073de2e84b559a3828f1fa8b1f782860e4ee967' 
 
 # ============================================================
 # FUNGSI PENCARIAN GOOGLE (SEARCH)
